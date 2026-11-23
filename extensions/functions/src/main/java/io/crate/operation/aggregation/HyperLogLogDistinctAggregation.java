@@ -25,6 +25,7 @@ import static java.lang.Double.doubleToLongBits;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.List;
 import java.util.UUID;
 
@@ -35,7 +36,9 @@ import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.NumericUtils;
 import org.elasticsearch.Version;
 import org.elasticsearch.common.breaker.CircuitBreakingException;
+import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.hash.MurmurHash3;
+import org.elasticsearch.common.io.stream.BytesStreamOutput;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.io.stream.Writeable;
@@ -120,7 +123,7 @@ public class HyperLogLogDistinctAggregation extends AggregationFunction<HyperLog
     private final Murmur3Hash murmur;
     private final DataType<?> dataType;
 
-    private HyperLogLogDistinctAggregation(Signature signature, BoundSignature boundSignature, DataType<?> dataType) {
+    HyperLogLogDistinctAggregation(Signature signature, BoundSignature boundSignature, DataType<?> dataType) {
         this.signature = signature;
         this.boundSignature = boundSignature;
         this.dataType = dataType;
@@ -342,13 +345,48 @@ public class HyperLogLogDistinctAggregation extends AggregationFunction<HyperLog
         // We're using BigArrays.NON_RECYCLING_INSTANCE and instances created using it are not accounted / recycled
         protected HyperLogLogPlusPlus hyperLogLogPlusPlus;
 
+        // Base64 text form, used to hand states to clients and accept them back: a version byte followed by
+        // the HyperLogLogPlusPlus serialization.
+        private static final byte TEXT_ENCODING_VERSION = 1;
+
         HllState() {
+        }
+
+        HllState(HyperLogLogPlusPlus hyperLogLogPlusPlus) {
+            this.hyperLogLogPlusPlus = hyperLogLogPlusPlus;
         }
 
         HllState(StreamInput in) throws IOException {
             if (in.readBoolean()) {
                 hyperLogLogPlusPlus = HyperLogLogPlusPlus.readFrom(in);
             }
+        }
+
+        String encodeBase64() throws IOException {
+            assert isInitialized() : "only initialized states can be encoded";
+            BytesStreamOutput out = new BytesStreamOutput();
+            out.writeByte(TEXT_ENCODING_VERSION);
+            hyperLogLogPlusPlus.writeTo(out);
+            return Base64.getEncoder().encodeToString(BytesReference.toBytes(out.bytes()));
+        }
+
+        static HllState decodeBase64(String encoded) throws IOException {
+            byte[] bytes;
+            try {
+                bytes = Base64.getDecoder().decode(encoded);
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException("hyperloglog state is not valid base64", e);
+            }
+            StreamInput in = StreamInput.wrap(bytes);
+            byte version = in.readByte();
+            if (version != TEXT_ENCODING_VERSION) {
+                throw new IllegalArgumentException("unsupported hyperloglog state encoding version: " + version);
+            }
+            return new HllState(HyperLogLogPlusPlus.readFrom(in));
+        }
+
+        int precision() {
+            return hyperLogLogPlusPlus.precision();
         }
 
         @Override
