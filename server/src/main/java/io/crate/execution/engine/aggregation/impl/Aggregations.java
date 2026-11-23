@@ -64,5 +64,6 @@ public class Aggregations implements FunctionsProvider {
         StandardDeviationSampAggregation.register(builder);
         NumericStandardDeviationSampAggregation.register(builder);
         TopKAggregation.register(builder);
+        TopKWeightedAggregation.register(builder);
     }
 }

@@ -1018,6 +1018,25 @@ on the number of items and capacity. E.g. Processing 10,000 items with the
 with frequencies greater 4 will be included. Some items with frequencies below
 the threshold 4 may also appear in the result.
 
+.. _aggregation-topk-bitmovin:
+
+``topk_bitmovin(column, weight, [k], [max_capacity])``
+------------------------------------------------------
+
+Weighted variant of :ref:`topk <aggregation-topk>`. Instead of counting
+occurrences, each row adds ``weight`` (a ``BIGINT``) to the frequency of the
+value in ``column``. The result has the same format as ``topk``, but
+``estimate``, ``lower_bound``, ``upper_bound`` and ``maximum_error`` are
+expressed in summed weight, and the error threshold uses ``N`` = total sum of
+weights.
+
+Rows where ``column`` or ``weight`` is ``NULL`` are skipped. Negative weights
+raise an error.
+
+Example::
+
+    SELECT topk_bitmovin(video_id, played_time_ms, 10, 16384) FROM views;
+
 .. _aggregation-largest-triangle-three-buckets:
 
 ``lttb(column, column, threshhold)``

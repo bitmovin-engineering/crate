@@ -130,9 +130,9 @@ public class TopKAggregation extends AggregationFunction<TopKAggregation.State, 
     private final BoundSignature boundSignature;
     private final DataType<?> argumentType;
 
-    private static final int DEFAULT_LIMIT = 8;
+    static final int DEFAULT_LIMIT = 8;
     private static final int MAX_LIMIT = 5_000;
-    private static final int DEFAULT_MAX_CAPACITY = 8192;
+    static final int DEFAULT_MAX_CAPACITY = 8192;
 
     private TopKAggregation(Signature signature, BoundSignature boundSignature) {
         this.signature = signature;
@@ -178,14 +178,14 @@ public class TopKAggregation extends AggregationFunction<TopKAggregation.State, 
             if (args.length == 3) {
                 Integer limit = (Integer) args[1].value();
                 Integer capacity = (Integer) args[2].value();
-                state = initState(ramAccounting, limit, capacity);
+                state = initState(ramAccounting, argumentType, limit, capacity);
             } else if (args.length == 2) {
                 // We have a limit provided by the user
                 Integer limit = (Integer) args[1].value();
-                state = initState(ramAccounting, limit, DEFAULT_MAX_CAPACITY);
+                state = initState(ramAccounting, argumentType, limit, DEFAULT_MAX_CAPACITY);
 
             } else if (args.length == 1) {
-                state = initState(ramAccounting, DEFAULT_LIMIT, DEFAULT_MAX_CAPACITY);
+                state = initState(ramAccounting, argumentType, DEFAULT_LIMIT, DEFAULT_MAX_CAPACITY);
             }
         }
         if (value != null) {
@@ -194,7 +194,7 @@ public class TopKAggregation extends AggregationFunction<TopKAggregation.State, 
         return state;
     }
 
-    private static long calculateRamUsage(long maxMapSize) {
+    static long calculateRamUsage(long maxMapSize) {
         // The internal memory space usage of item sketch will never exceed 18 * maxMapSize bytes, plus a small
         // constant number of additional bytes.
         // https://datasketches.apache.org/docs/Frequency/FrequentItemsOverview.html
@@ -302,6 +302,14 @@ public class TopKAggregation extends AggregationFunction<TopKAggregation.State, 
 
         void update(long value, DataType<?> dataType);
 
+        /**
+         * Adds {@code weight} to the frequency of {@code value} (used by topk_bitmovin).
+         * {@code weight} must be >= 0; a weight of 0 is a no-op.
+         */
+        void update(Object value, long weight, DataType<?> dataType);
+
+        void update(long value, long weight, DataType<?> dataType);
+
         void writeTo(StreamOutput out, DataType<?> innerType) throws IOException;
 
         static State fromStream(StreamInput in, DataType<?> innerType) throws IOException {
@@ -341,6 +349,16 @@ public class TopKAggregation extends AggregationFunction<TopKAggregation.State, 
 
         @Override
         public void update(long value, DataType<?> dataType) {
+            throw new UnsupportedOperationException("Empty state does not support updates");
+        }
+
+        @Override
+        public void update(Object value, long weight, DataType<?> dataType) {
+            throw new UnsupportedOperationException("Empty state does not support updates");
+        }
+
+        @Override
+        public void update(long value, long weight, DataType<?> dataType) {
             throw new UnsupportedOperationException("Empty state does not support updates");
         }
 
@@ -411,6 +429,16 @@ public class TopKAggregation extends AggregationFunction<TopKAggregation.State, 
         @Override
         public void update(long value, DataType<?> dataType) {
             sketch.update(value);
+        }
+
+        @Override
+        public void update(Object value, long weight, DataType<?> dataType) {
+            sketch.update(value, weight);
+        }
+
+        @Override
+        public void update(long value, long weight, DataType<?> dataType) {
+            sketch.update(value, weight);
         }
 
         @Override
@@ -486,6 +514,16 @@ public class TopKAggregation extends AggregationFunction<TopKAggregation.State, 
         }
 
         @Override
+        public void update(Object value, long weight, DataType<?> dataType) {
+            sketch.update(toLong(dataType, value), weight);
+        }
+
+        @Override
+        public void update(long value, long weight, DataType<?> dataType) {
+            sketch.update(value, weight);
+        }
+
+        @Override
         public void writeTo(StreamOutput out, DataType<?> innerType) throws IOException {
             out.writeByte((byte) ID);
             out.writeInt(limit);
@@ -517,7 +555,7 @@ public class TopKAggregation extends AggregationFunction<TopKAggregation.State, 
         }
     }
 
-    private static boolean supportedByLongSketch(DataType<?> type) {
+    static boolean supportedByLongSketch(DataType<?> type) {
         return switch (type.id()) {
             case LongType.ID,
                  DoubleType.ID,
@@ -531,7 +569,16 @@ public class TopKAggregation extends AggregationFunction<TopKAggregation.State, 
         };
     }
 
-    private State initState(RamAccounting ramAccounting, int limit, int capacity) {
+    static State initState(RamAccounting ramAccounting, DataType<?> argumentType, int limit, int capacity) {
+        validateParams(limit, capacity);
+        if (supportedByLongSketch(argumentType)) {
+            return topKLongState(ramAccounting, limit, capacity);
+        } else {
+            return topKState(ramAccounting, limit, capacity);
+        }
+    }
+
+    static void validateParams(int limit, int capacity) {
         if (limit <= 0 || limit > MAX_LIMIT) {
             throw new IllegalArgumentException(
                 "Limit parameter for topk must be between 0 and 10_000. Got: " + limit);
@@ -545,19 +592,14 @@ public class TopKAggregation extends AggregationFunction<TopKAggregation.State, 
                 "Limit parameter for topk must be less than capacity parameter. Got limit: "
                     + limit + " capacity: " + capacity);
         }
-        if (supportedByLongSketch(argumentType)) {
-            return topKLongState(ramAccounting, limit, capacity);
-        } else {
-            return topKState(ramAccounting, limit, capacity);
-        }
     }
 
-    private TopKState topKState(RamAccounting ramAccounting, int limit, int capacity) {
+    static TopKState topKState(RamAccounting ramAccounting, int limit, int capacity) {
         ramAccounting.addBytes(calculateRamUsage(capacity) + TopKState.SHALLOW_SIZE);
         return new TopKState(new FrequentItemsSketch<>(capacity), limit);
     }
 
-    private TopKLongState topKLongState(RamAccounting ramAccounting, int limit, int capacity) {
+    static TopKLongState topKLongState(RamAccounting ramAccounting, int limit, int capacity) {
         ramAccounting.addBytes(calculateRamUsage(capacity) + TopKLongState.SHALLOW_SIZE);
         return new TopKLongState(new FrequentLongsSketch(capacity), limit);
     }
@@ -569,6 +611,10 @@ public class TopKAggregation extends AggregationFunction<TopKAggregation.State, 
 
         public StateType(DataType<?> innerType) {
             this.innerType = innerType;
+        }
+
+        DataType<?> innerType() {
+            return innerType;
         }
 
         public StateType(StreamInput streamInput) throws IOException {
