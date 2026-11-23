@@ -26,7 +26,6 @@ import static io.crate.protocols.postgres.PGErrorStatus.DUPLICATE_TABLE;
 import static io.crate.protocols.postgres.PGErrorStatus.INTERNAL_ERROR;
 import static io.crate.testing.Asserts.assertThat;
 import static io.netty.handler.codec.http.HttpResponseStatus.CONFLICT;
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.Locale;
@@ -235,13 +234,15 @@ public class ViewsITest extends IntegTestCase {
 
     @Test
     public void testSubscriptOnViews() {
-        execute("create table t1 (a object as (b integer), c object as (d object as (e integer))) ");
-        execute("insert into t1 (a, c) values ({ b = 1 }, { d = { e = 2 }})");
+        execute("create table t1 (a object as (b integer), c object as (d object as (e integer)), " +
+                "items array(object as (x integer, o object as (y integer))))");
+        execute("insert into t1 (a, c, items) values ({ b = 1 }, { d = { e = 2 }}, [{ x = 3, o = { y = 4 }}])");
         execute("refresh table t1");
         execute("create view v1 as select * from t1");
         // must not throw an exception, subscript must be resolved
-        execute("select a['b'], c['d']['e'] from v1");
-        assertThat(response).hasRows("1| 2");
+        // https://github.com/crate/crate/issues/20652: also on an array of objects
+        execute("select a['b'], c['d']['e'], items['x'], items['o']['y'] from v1");
+        assertThat(response).hasRows("1| 2| [3]| [4]");
     }
 
     @Test

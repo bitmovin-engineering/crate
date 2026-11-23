@@ -33,6 +33,7 @@ import java.util.Objects;
 
 import org.jspecify.annotations.Nullable;
 
+import io.crate.expression.scalar.SubscriptFunctions;
 import io.crate.expression.scalar.SubscriptObjectFunction;
 import io.crate.expression.symbol.Aggregation;
 import io.crate.expression.symbol.AliasSymbol;
@@ -55,7 +56,9 @@ import io.crate.metadata.ColumnIdent;
 import io.crate.metadata.GeneratedReference;
 import io.crate.metadata.Reference;
 import io.crate.metadata.RelationName;
+import io.crate.types.ArrayType;
 import io.crate.types.DataType;
+import io.crate.types.ObjectType;
 
 /**
  * Provides functions to create {@link InputColumn}s
@@ -311,6 +314,15 @@ public final class InputColumns extends SymbolVisitor<InputColumns.SourceSymbols
 
         DataType<?> returnType = symbol.valueType();
         List<String> path = column.path();
+
+        DataType<?> rootType = rootIC.valueType();
+        if (rootType instanceof ArrayType<?> && ArrayType.unnest(rootType) instanceof ObjectType) {
+            // subscript_obj only works on objects, an array of objects needs the array subscript
+            Function arraySubscript = SubscriptFunctions.tryCreateSubscript(rootIC, path);
+            if (arraySubscript != null) {
+                return arraySubscript;
+            }
+        }
 
         List<Symbol> arguments = mapTail(rootIC, path, Literal::of);
 

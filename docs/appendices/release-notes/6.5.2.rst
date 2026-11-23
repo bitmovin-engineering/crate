@@ -46,6 +46,10 @@ series.
 Fixes
 =====
 
+- Fixed a ``ClassCastException`` error which was thrown when using a subscript
+  on a column of type ``ARRAY(OBJECT)`` selected from a view or a subquery, for
+  example ``SELECT items['x'] FROM v``.
+
 - Fixed a ``NullPointerException`` that occurred when updating a column of
   type ``ARRAY(OBJECT)``, or an object containing one, with an array that
   contains a ``null`` element. The ``null`` element is now stored, matching the
