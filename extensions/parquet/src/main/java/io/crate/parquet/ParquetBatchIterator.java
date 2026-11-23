@@ -31,7 +31,10 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
+import dev.hardwood.HardwoodContext;
 import dev.hardwood.InputFile;
+import dev.hardwood.MetadataSource;
+import dev.hardwood.metadata.ParsedFooter;
 import dev.hardwood.reader.FilterPredicate;
 import dev.hardwood.reader.ParquetFileReader;
 import dev.hardwood.reader.RowReader;
@@ -51,6 +54,7 @@ import io.crate.expression.symbol.Function;
 import io.crate.expression.symbol.Literal;
 import io.crate.expression.symbol.Symbol;
 import io.crate.metadata.Reference;
+import io.crate.parquet.ParquetForeignDataWrapper.FooterCacheKey;
 
 public class ParquetBatchIterator implements BatchIterator<Row> {
 
@@ -71,13 +75,15 @@ public class ParquetBatchIterator implements BatchIterator<Row> {
         LtOperator.NAME, FilterPredicate.Operator.LT,
         LteOperator.NAME, FilterPredicate.Operator.LT_EQ
     );
+    private Map<FooterCacheKey, ParsedFooter> footerCache;
 
-    public ParquetBatchIterator(List<InputFile> inputFiles, List<Reference> columns, Symbol predicates) {
+    public ParquetBatchIterator(List<InputFile> inputFiles, List<Reference> columns, Symbol predicates, Map<FooterCacheKey, ParsedFooter> footerCache) {
         this.inputFiles = inputFiles;
         this.columns = columns;
         this.predicates = predicates;
         this.cells = new Object[columns.size()];
         this.row = new RowN(cells);
+        this.footerCache = footerCache;
     }
 
     private FilterPredicate createFilter() {
@@ -191,8 +197,22 @@ public class ParquetBatchIterator implements BatchIterator<Row> {
     }
 
     private void initReader() {
+        MetadataSource footers = file -> {
+            FooterCacheKey key = new FooterCacheKey(file.name(), file.identity().orElseThrow());
+            ParsedFooter footer = footerCache.get(key);
+            if (footer == null) {
+                footer = ParsedFooter.readFrom(file);
+                footerCache.put(key, footer);
+            }
+            return footer;
+        };
+
         try {
-            reader = ParquetFileReader.openAll(inputFiles);
+            HardwoodContext context = HardwoodContext.builder()
+                .metadataSource(footers)
+                .build();
+
+            reader = ParquetFileReader.openAll(inputFiles, context);
             fileSchema = reader.getFileSchema();
             RowReaderBuilder builder = reader.buildRowReader();
             if (!columns.isEmpty()) {

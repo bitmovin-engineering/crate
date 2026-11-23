@@ -28,6 +28,7 @@ import java.net.URI;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -40,6 +41,7 @@ import org.elasticsearch.common.settings.Settings;
 
 import dev.hardwood.InputFile;
 import dev.hardwood.internal.reader.RangeBackedInputFile;
+import dev.hardwood.metadata.ParsedFooter;
 import io.crate.common.io.IOUtils;
 import io.crate.data.BatchIterator;
 import io.crate.data.Row;
@@ -75,6 +77,10 @@ public class ParquetForeignDataWrapper implements ForeignDataWrapper {
     private final List<Setting<?>> mandatoryServerOptions = List.of(filesSetting);
     private final List<Setting<?>> optionalServerOptions = List.of(protocolSetting, regionSetting);
     private static ConcurrentHashMap<String, RangeBackedInputFile> inputFileCache = new ConcurrentHashMap<>();
+
+    public record FooterCacheKey(String uri, String etag) {}
+
+    private Map<FooterCacheKey, ParsedFooter> footerCache = new ConcurrentHashMap<>();
 
     public String name() {
         return "parquet";
@@ -186,7 +192,7 @@ public class ParquetForeignDataWrapper implements ForeignDataWrapper {
 
         AsyncExecutor asyncExecutor = sharedAsyncExecutor.asyncExecutor();
         List<InputFile> inputFiles = urisToInputFiles(asyncExecutor, currentUser, pathsToFiles, options);
-        BatchIterator<Row> it = new ParquetBatchIterator(inputFiles, columns, query);
+        BatchIterator<Row> it = new ParquetBatchIterator(inputFiles, columns, query, footerCache);
         it = inputRowProjector.apply(it);
         return CompletableFuture.completedFuture(it);
     }
