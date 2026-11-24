@@ -31,6 +31,7 @@ import io.crate.operation.aggregation.HyperLogLogMergeAggregation;
 import io.crate.operation.aggregation.HyperLogLogMergeStateAggregation;
 import io.crate.operation.aggregation.HyperLogLogStateAggregation;
 import io.crate.operation.aggregation.LTTBAggregation;
+import io.crate.operation.scalar.Fnv1a64Function;
 import io.crate.window.NthValueFunctions;
 import io.crate.window.OffsetValueFunctions;
 import io.crate.window.RankFunctions;
@@ -46,6 +47,7 @@ public class ExtraFunctions implements FunctionsProvider {
         HyperLogLogMergeAggregation.register(builder);
         HyperLogLogMergeStateAggregation.register(builder);
         LTTBAggregation.register(builder);
+        Fnv1a64Function.register(builder);
         NthValueFunctions.register(builder);
         OffsetValueFunctions.register(builder);
         RankFunctions.register(builder);

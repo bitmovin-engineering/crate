@@ -93,7 +93,10 @@ public class HyperLogLogMergeAggregation extends AggregationFunction<HllState, L
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
-        ramAccounting.addBytes(HyperLogLogPlusPlus.memoryUsage(decodedState.precision()));
+        // only the first decoded state is retained as the group's state, every later one is merged into it
+        if (state.isInitialized() == false) {
+            ramAccounting.addBytes(HyperLogLogPlusPlus.memoryUsage(decodedState.precision()));
+        }
         return reduce(ramAccounting, state, decodedState);
     }
 
