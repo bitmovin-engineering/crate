@@ -23,16 +23,10 @@ package io.crate.operation.aggregation;
 
 import static java.lang.Double.doubleToLongBits;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.Base64;
 import java.util.List;
 import java.util.UUID;
-import java.util.zip.DeflaterOutputStream;
-import java.util.zip.InflaterInputStream;
-import java.util.zip.ZipException;
 
 import org.apache.lucene.index.DocValues;
 import org.apache.lucene.index.LeafReaderContext;
@@ -41,9 +35,7 @@ import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.NumericUtils;
 import org.elasticsearch.Version;
 import org.elasticsearch.common.breaker.CircuitBreakingException;
-import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.hash.MurmurHash3;
-import org.elasticsearch.common.io.stream.BytesStreamOutput;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.io.stream.Writeable;
@@ -350,57 +342,13 @@ public class HyperLogLogDistinctAggregation extends AggregationFunction<HyperLog
         // We're using BigArrays.NON_RECYCLING_INSTANCE and instances created using it are not accounted / recycled
         protected HyperLogLogPlusPlus hyperLogLogPlusPlus;
 
-        // Base64 text form, used to hand states to clients and accept them back: a version byte followed by
-        // the deflated HyperLogLogPlusPlus serialization. Deflate roughly halves the register array, whose
-        // values are small and repetitive.
-        private static final byte TEXT_ENCODING_VERSION = 2;
-
         HllState() {
-        }
-
-        HllState(HyperLogLogPlusPlus hyperLogLogPlusPlus) {
-            this.hyperLogLogPlusPlus = hyperLogLogPlusPlus;
         }
 
         HllState(StreamInput in) throws IOException {
             if (in.readBoolean()) {
                 hyperLogLogPlusPlus = HyperLogLogPlusPlus.readFrom(in);
             }
-        }
-
-        String encodeBase64() throws IOException {
-            assert isInitialized() : "only initialized states can be encoded";
-            BytesStreamOutput serialized = new BytesStreamOutput();
-            hyperLogLogPlusPlus.writeTo(serialized);
-            ByteArrayOutputStream encoded = new ByteArrayOutputStream();
-            encoded.write(TEXT_ENCODING_VERSION);
-            try (DeflaterOutputStream deflated = new DeflaterOutputStream(encoded)) {
-                deflated.write(BytesReference.toBytes(serialized.bytes()));
-            }
-            return Base64.getEncoder().encodeToString(encoded.toByteArray());
-        }
-
-        static HllState decodeBase64(String encoded) throws IOException {
-            byte[] bytes;
-            try {
-                bytes = Base64.getDecoder().decode(encoded);
-            } catch (IllegalArgumentException e) {
-                throw new IllegalArgumentException("hyperloglog state is not valid base64", e);
-            }
-            if (bytes.length == 0 || bytes[0] != TEXT_ENCODING_VERSION) {
-                throw new IllegalArgumentException("unsupported hyperloglog state encoding version");
-            }
-            byte[] serialized;
-            try (InflaterInputStream inflated = new InflaterInputStream(new ByteArrayInputStream(bytes, 1, bytes.length - 1))) {
-                serialized = inflated.readAllBytes();
-            } catch (ZipException e) {
-                throw new IllegalArgumentException("hyperloglog state is corrupt", e);
-            }
-            return new HllState(HyperLogLogPlusPlus.readFrom(StreamInput.wrap(serialized)));
-        }
-
-        int precision() {
-            return hyperLogLogPlusPlus.precision();
         }
 
         @Override

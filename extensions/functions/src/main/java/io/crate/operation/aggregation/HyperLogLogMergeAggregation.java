@@ -31,7 +31,6 @@ import org.jspecify.annotations.Nullable;
 import io.crate.data.Input;
 import io.crate.data.breaker.RamAccounting;
 import io.crate.execution.engine.aggregation.AggregationFunction;
-import io.crate.execution.engine.aggregation.impl.HyperLogLogPlusPlus;
 import io.crate.memory.MemoryManager;
 import io.crate.metadata.FunctionType;
 import io.crate.metadata.Functions;
@@ -44,10 +43,10 @@ import io.crate.types.DataType;
 import io.crate.types.DataTypes;
 
 /**
- * Merges base64 encoded states produced by {@link HyperLogLogStateAggregation} and returns the cardinality
- * of the union. All states must have been created with the same precision.
+ * Same as {@link HyperLogLogMergeDistinctAggregation} but returns the merged state as base64 text instead of
+ * the cardinality, so states can be merged incrementally.
  */
-public class HyperLogLogMergeAggregation extends AggregationFunction<HllState, Long> {
+public class HyperLogLogMergeAggregation extends AggregationFunction<HllState, String> {
 
     static final String NAME = "hyperloglog_merge";
 
@@ -55,7 +54,7 @@ public class HyperLogLogMergeAggregation extends AggregationFunction<HllState, L
         builder.add(
             Signature.builder(NAME, FunctionType.AGGREGATE)
                 .argumentTypes(DataTypes.STRING.getTypeSignature())
-                .returnType(DataTypes.LONG.getTypeSignature())
+                .returnType(DataTypes.STRING.getTypeSignature())
                 .features(Feature.DETERMINISTIC)
                 .build(),
             HyperLogLogMergeAggregation::new
@@ -64,10 +63,12 @@ public class HyperLogLogMergeAggregation extends AggregationFunction<HllState, L
 
     private final Signature signature;
     private final BoundSignature boundSignature;
+    private final HyperLogLogMergeDistinctAggregation mergeDistinctAggregation;
 
-    HyperLogLogMergeAggregation(Signature signature, BoundSignature boundSignature) {
+    private HyperLogLogMergeAggregation(Signature signature, BoundSignature boundSignature) {
         this.signature = signature;
         this.boundSignature = boundSignature;
+        this.mergeDistinctAggregation = new HyperLogLogMergeDistinctAggregation(signature, boundSignature);
     }
 
     @Nullable
@@ -75,7 +76,7 @@ public class HyperLogLogMergeAggregation extends AggregationFunction<HllState, L
     public HllState newState(RamAccounting ramAccounting,
                              Version minNodeInCluster,
                              MemoryManager memoryManager) {
-        return new HllState();
+        return mergeDistinctAggregation.newState(ramAccounting, minNodeInCluster, memoryManager);
     }
 
     @Override
@@ -83,42 +84,25 @@ public class HyperLogLogMergeAggregation extends AggregationFunction<HllState, L
                             MemoryManager memoryManager,
                             HllState state,
                             Input<?>... args) throws CircuitBreakingException {
-        String encodedState = DataTypes.STRING.sanitizeValue(args[0].value());
-        if (encodedState == null) {
-            return state;
-        }
-        HllState decodedState;
-        try {
-            decodedState = HllState.decodeBase64(encodedState);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-        // only the first decoded state is retained as the group's state, every later one is merged into it
-        if (state.isInitialized() == false) {
-            ramAccounting.addBytes(HyperLogLogPlusPlus.memoryUsage(decodedState.precision()));
-        }
-        return reduce(ramAccounting, state, decodedState);
+        return mergeDistinctAggregation.iterate(ramAccounting, memoryManager, state, args);
     }
 
     @Override
     public HllState reduce(RamAccounting ramAccounting, HllState state1, HllState state2) {
-        if (state1.isInitialized() == false) {
-            return state2;
-        }
-        if (state2.isInitialized()) {
-            if (state1.precision() != state2.precision()) {
-                throw new IllegalArgumentException(
-                    "cannot merge hyperloglog states with different precisions: "
-                    + state1.precision() + " and " + state2.precision());
-            }
-            state1.merge(state2);
-        }
-        return state1;
+        return mergeDistinctAggregation.reduce(ramAccounting, state1, state2);
     }
 
+    @Nullable
     @Override
-    public Long terminatePartial(RamAccounting ramAccounting, HllState state) {
-        return state.isInitialized() ? state.value() : 0L;
+    public String terminatePartial(RamAccounting ramAccounting, HllState state) {
+        if (state.isInitialized() == false) {
+            return null;
+        }
+        try {
+            return HllStateCodec.encode(state);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     @Override

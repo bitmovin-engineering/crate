@@ -70,7 +70,7 @@ public class HyperLogLogStateMergeIntegrationTest extends IntegTestCase {
         assertThat(states).hasSize(NUM_DAYS * 2);
 
         execute(
-            "select country, hyperloglog_merge(state) from unnest(?, ?) as t (country, state) " +
+            "select country, hyperloglog_merge_distinct(state) from unnest(?, ?) as t (country, state) " +
             "group by country order by country",
             new Object[]{stateCountries, states});
         assertThat(printedTable(response.rows())).isEqualTo(expected);

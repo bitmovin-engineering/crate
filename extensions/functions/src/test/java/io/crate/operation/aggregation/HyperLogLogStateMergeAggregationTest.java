@@ -69,6 +69,10 @@ public class HyperLogLogStateMergeAggregationTest extends AggregationTestCase {
         return function.terminatePartial(RamAccounting.NO_ACCOUNTING, state);
     }
 
+    private AggregationFunction<HllState, Long> mergeDistinctFunction() {
+        return getFunction(HyperLogLogMergeDistinctAggregation.NAME, List.of(Literal.of("x")));
+    }
+
     private String aggregateStateOfLongs(List<Object[]> rows) {
         return aggregate(getFunction(HyperLogLogStateAggregation.NAME, List.of(Literal.of(1L), Literal.of(PRECISION))), rows);
     }
@@ -90,41 +94,41 @@ public class HyperLogLogStateMergeAggregationTest extends AggregationTestCase {
         }
         assertThat(encodedChunkStates).hasSize(NUM_CHUNKS);
 
-        AggregationFunction<HllState, Long> merge = getFunction(HyperLogLogMergeAggregation.NAME, List.of(Literal.of("x")));
-        assertThat(aggregate(merge, encodedChunkStates)).isEqualTo(expected);
+        AggregationFunction<HllState, Long> mergeDistinct = mergeDistinctFunction();
+        assertThat(aggregate(mergeDistinct, encodedChunkStates)).isEqualTo(expected);
 
         // incremental: fold the chunk states one by one into a running state
-        AggregationFunction<HllState, String> mergeState =
-            getFunction(HyperLogLogMergeStateAggregation.NAME, List.of(Literal.of("x")));
+        AggregationFunction<HllState, String> merge =
+            getFunction(HyperLogLogMergeAggregation.NAME, List.of(Literal.of("x")));
         String runningState = null;
         for (Object[] chunkState : encodedChunkStates) {
-            runningState = aggregate(mergeState, List.<Object[]>of(new Object[]{runningState}, chunkState));
+            runningState = aggregate(merge, List.<Object[]>of(new Object[]{runningState}, chunkState));
         }
-        assertThat(aggregate(merge, List.<Object[]>of(new Object[]{runningState}))).isEqualTo(expected);
+        assertThat(aggregate(mergeDistinct, List.<Object[]>of(new Object[]{runningState}))).isEqualTo(expected);
     }
 
     @Test
     public void test_state_without_rows_is_null_and_merge_without_states_is_0() {
         assertThat(aggregateStateOfLongs(List.<Object[]>of())).isNull();
-        AggregationFunction<HllState, Long> merge = getFunction(HyperLogLogMergeAggregation.NAME, List.of(Literal.of("x")));
-        assertThat(aggregate(merge, List.<Object[]>of())).isEqualTo(0L);
-        assertThat(aggregate(merge, List.<Object[]>of(new Object[]{null}))).isEqualTo(0L);
+        AggregationFunction<HllState, Long> mergeDistinct = mergeDistinctFunction();
+        assertThat(aggregate(mergeDistinct, List.<Object[]>of())).isEqualTo(0L);
+        assertThat(aggregate(mergeDistinct, List.<Object[]>of(new Object[]{null}))).isEqualTo(0L);
     }
 
     @Test
     public void test_merge_rejects_states_with_different_precision() {
         String stateWithPrecision12 = aggregateStateOfLongs(List.<Object[]>of(new Object[]{1L, 12}));
         String stateWithPrecision14 = aggregateStateOfLongs(List.<Object[]>of(new Object[]{1L, 14}));
-        AggregationFunction<HllState, Long> merge = getFunction(HyperLogLogMergeAggregation.NAME, List.of(Literal.of("x")));
-        assertThatThrownBy(() -> aggregate(merge, List.<Object[]>of(new Object[]{stateWithPrecision12}, new Object[]{stateWithPrecision14})))
+        AggregationFunction<HllState, Long> mergeDistinct = mergeDistinctFunction();
+        assertThatThrownBy(() -> aggregate(mergeDistinct, List.<Object[]>of(new Object[]{stateWithPrecision12}, new Object[]{stateWithPrecision14})))
             .isExactlyInstanceOf(IllegalArgumentException.class)
             .hasMessage("cannot merge hyperloglog states with different precisions: 12 and 14");
     }
 
     @Test
     public void test_merge_rejects_invalid_state() {
-        AggregationFunction<HllState, Long> merge = getFunction(HyperLogLogMergeAggregation.NAME, List.of(Literal.of("x")));
-        assertThatThrownBy(() -> aggregate(merge, List.<Object[]>of(new Object[]{"not a state"})))
+        AggregationFunction<HllState, Long> mergeDistinct = mergeDistinctFunction();
+        assertThatThrownBy(() -> aggregate(mergeDistinct, List.<Object[]>of(new Object[]{"not a state"})))
             .isExactlyInstanceOf(IllegalArgumentException.class)
             .hasMessage("hyperloglog state is not valid base64");
     }

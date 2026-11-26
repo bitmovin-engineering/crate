@@ -51,7 +51,8 @@ import io.crate.types.UUIDType;
 
 /**
  * Same as {@link HyperLogLogDistinctAggregation} but returns the aggregated HyperLogLog++ state as base64 text
- * instead of the cardinality, so it can be stored by clients and merged later via {@link HyperLogLogMergeAggregation}.
+ * instead of the cardinality, so it can be stored by clients and merged later via {@link HyperLogLogMergeAggregation}
+ * or {@link HyperLogLogMergeDistinctAggregation}.
  */
 public class HyperLogLogStateAggregation extends AggregationFunction<HllState, String> {
 
@@ -124,7 +125,7 @@ public class HyperLogLogStateAggregation extends AggregationFunction<HllState, S
             return null;
         }
         try {
-            return state.encodeBase64();
+            return HllStateCodec.encode(state);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
