@@ -120,7 +120,7 @@ public class HyperLogLogDistinctAggregation extends AggregationFunction<HyperLog
     private final Murmur3Hash murmur;
     private final DataType<?> dataType;
 
-    private HyperLogLogDistinctAggregation(Signature signature, BoundSignature boundSignature, DataType<?> dataType) {
+    HyperLogLogDistinctAggregation(Signature signature, BoundSignature boundSignature, DataType<?> dataType) {
         this.signature = signature;
         this.boundSignature = boundSignature;
         this.dataType = dataType;

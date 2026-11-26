@@ -27,6 +27,9 @@ import io.crate.metadata.Functions.Builder;
 import io.crate.metadata.FunctionsProvider;
 import io.crate.metadata.settings.session.SessionSettingRegistry;
 import io.crate.operation.aggregation.HyperLogLogDistinctAggregation;
+import io.crate.operation.aggregation.HyperLogLogMergeAggregation;
+import io.crate.operation.aggregation.HyperLogLogMergeDistinctAggregation;
+import io.crate.operation.aggregation.HyperLogLogStateAggregation;
 import io.crate.operation.aggregation.LTTBAggregation;
 import io.crate.window.NthValueFunctions;
 import io.crate.window.OffsetValueFunctions;
@@ -39,6 +42,9 @@ public class ExtraFunctions implements FunctionsProvider {
                              SessionSettingRegistry sessionSettingRegistry,
                              Builder builder) {
         HyperLogLogDistinctAggregation.register(builder);
+        HyperLogLogStateAggregation.register(builder);
+        HyperLogLogMergeAggregation.register(builder);
+        HyperLogLogMergeDistinctAggregation.register(builder);
         LTTBAggregation.register(builder);
         NthValueFunctions.register(builder);
         OffsetValueFunctions.register(builder);
